@@ -16,7 +16,8 @@
 #define AMBIENT_MAX_BASS_VOLUME 50
 #define AMBIENT_MAX_VOLUME 25
 
-#define BASS_THRESHOLD 160
+#define BASS_THRESHOLD 150
+#define ACCENT_THRESHOLD 150
 
 #define BASS_MIN 0
 #define BASS_MAX 5
@@ -67,77 +68,69 @@ void loop()
 		fft_execute(bfly_buff);
 		fft_output(bfly_buff, spectrum);
 		
-		// if (spectrum[0] < 400) {
-		// if (accentSkipCount == 0) {
-		// int bass = 0, mid = 0, treble = 0;
-		// int bassCount = 0, midCount = 0, trebleCount = 0;
-		// if (spectrum[0] < 20 && spectrum[1] < 20) {
-			graph();
-			if (at_ambient_levels()) {
-				fade_ambient();
+		graph();
+		if (at_ambient_levels()) {
+			fade_ambient();
+		} else {
+			if (bass_hit()) {
+				setRGB(255, 255, 255);
 			} else {
-				if (spectrum[0] > BASS_THRESHOLD && spectrum[0]-spectrum[1] > 40) {
-					setRGB(255, 255, 255);
+				byte accent_index = find_accent();
+				if (accent_index != -1) {
+			        if (accent_index < 6)
+			            setRGB(255, (accent_index-1)*51, 0.0);
+			        else if (accent_index < 11)
+			            setRGB((255-(accent_index-6)*51), 255, 0.0);
+			        else if (accent_index < 16)
+			            setRGB(0, 255, (accent_index-11)*51);
+			        else if (accent_index < 33)
+			            setRGB(0, (255-(accent_index-16)*15), 255);
+			        else
+			            setRGB((accent_index-33)*7, 0, 255);
 				} else {
-					byte peak = 2;
-					for (byte i = 2; i < 41; i++) {
-						if (spectrum[i] > 80 && spectrum[i] > spectrum[i-1] && spectrum[i] > spectrum[i+1]) peak = i;
+					int low = 0, mid = 0, high = 0;
+					int low_count = 0, mid_count = 0, high_count = 0;
+
+					// average loop
+					for (byte i = 1; i < 64; i++) {
+						int s = spectrum[i];
+						if (s > AMBIENT_MAX_VOLUME) {
+							if (i < BASS_MAX) {
+								low += s;
+								low_count`++;
+							} else if (i < MID_MAX) {
+								mid += s;
+								mid_count++;
+							} else {
+								high += s;
+								high_count++;
+							}
+						}	
 					}
-					// if (peak != 0) {
-					if (peak < 21) {
-						setRGB(255 - 25*peak, 25*peak,0);
+
+					low /= low_count;
+					mid /= mid_count;
+					high /= high_count;
+
+					if (low < mid) { // remove lowest
+						if (low < high) low = 0;
+						else high = 0;
 					} else {
-					 	peak -= 20;
-						setRGB(0, 255 - 25*peak, 25*peak);
+						if (mid < high) mid = 0;
+						else high = 0;
 					}
+					int sum = low + mid + high;
+
+					int frac_low = low * 255 / sum;
+					int frac_mid = mid * 255 / sum;
+					int frac_high = high * 255 / sum;
+					
+					setRGB(frac_low, frac_mid, frac_high);
 				}
 			}
-		// }
-		// }
-			// // average loop
-			// for (byte i = 0; i < 64; i++) {
-			// 	int s = spectrum[i];
-			// 	if (s > 30) {
-			// 		if (i < BASS_MAX) {
-			// 			bass += s;
-			// 			bassCount++;
-			// 		} else if (i < MID_MAX) {
-			// 			mid += s;
-			// 			midCount++;
-			// 		} else {
-			// 			treble += s;
-			// 			trebleCount++;
-			// 		}
-			// 	}	
-			// }
-
-			// bass = bass / bassCount;
-			// mid /= midCount;
-			// treble /= trebleCount;
-
-			// if (bass < mid) { // remove lowest
-			// 	if (bass < treble) bass = 0;
-			// 	else treble = 0;
-			// } else {
-			// 	if (mid < treble) mid = 0;
-			// 	else treble = 0;
-			// }
-			// int sum = bass + mid + treble;
-
-			// int fracBass = bass * 255 / sum;
-			// int fracMid = mid * 255 / sum;
-			// int fracTreble = treble * 255 / sum;
-			
-			// setRGB(fracTreble, fracMid, fracBass);
-			// setRGB(bass, mid, treble);
-			// accentSkipCount = 5;
-		// }
-		// accentSkipCount--;
+		}
 		position = 0;
-	// }
 	}
-	// if (position % 10 == 0) fade(1);
-
 }
 
 void setRGB(int r, int g, int b)
@@ -214,6 +207,23 @@ void fade_ambient()
 		setRGB(AMBIENT_MAX_LED*3 - ambient_led, ambient_led - AMBIENT_MAX_LED*2, 0);
 	if (ambient_counter % AMBIENT_SLOWDOWN_FACTOR == 0) ambient_led = (ambient_led + 1) % (AMBIENT_MAX_LED*3);
 	ambient_counter = (ambient_counter + 1) % AMBIENT_SLOWDOWN_FACTOR;
+}
+
+// currently returns last accent, may need to modify
+byte find_accent()
+{
+	byte accent_index = -1;
+	for (byte i = 2; i < 41; i++) {
+		if (spectrum[i] > ACCENT_THRESHOLD &&
+			spectrum[i] > spectrum[i-1]    &&
+			spectrum[i] > spectrum[i+1]) accent_index = i;
+	}
+	return accent_index;
+}
+
+bool bass_hit() 
+{
+	return spectrum[0] > BASS_THRESHOLD && spectrum[0]-spectrum[1] > 40;
 }
 
 /**
