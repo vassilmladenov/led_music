@@ -11,8 +11,10 @@
 #include <ffft.h>
 
 #define AMBIENT_MAX_LED 50
-#define AMBIENT_MAX_VOLUME 25
 #define AMBIENT_SLOWDOWN_FACTOR 2
+
+#define AMBIENT_MAX_BASS_VOLUME 50
+#define AMBIENT_MAX_VOLUME 25
 
 #define BASS_THRESHOLD 160
 
@@ -25,7 +27,7 @@
 #define TREBLE_MIN 16
 #define TREBLE_MAX 64
 
-#define  IR_AUDIO  5 // ADC channel to capture
+#define  IR_AUDIO  5 // Analog input pin of the microphone
 
 #define REDPIN 5
 #define GREENPIN 6
@@ -138,59 +140,6 @@ void loop()
 
 }
 
-/**
- * Begin FFT functions
- */
-ISR(ADC_vect)
-{
-	if (position >= FFT_N)
-		return;
-
-	capture[position] = ADC + zero;
-	if (capture[position] == -1 || capture[position] == 1)
-		capture[position] = 0;
-
-	position++;
-}
-
-void adcInit()
-{
-	/**   REFS0 : VCC use as a ref, 
-	 *    IR_AUDIO : channel selection, 
-	 *    ADEN : ADC Enable, 
-	 *    ADSC : ADC Start, 
-	 *    ADATE : ADC Auto Trigger Enable, 
-	 *    ADIE : ADC Interrupt Enable,  
-	 *    ADPS : ADC Prescaler  
-	 */
-	
-	// free running ADC mode, f = ( 16MHz / prescaler ) / 13 cycles per conversion 
-	ADMUX = _BV(REFS0) | IR_AUDIO; // | _BV(ADLAR); 
-	
-	//  ADCSRA = _BV(ADSC) | _BV(ADEN) | _BV(ADATE) | _BV(ADIE) | _BV(ADPS2) | _BV(ADPS1) 
-	//prescaler 64 : 19231 Hz - 300Hz per 64 divisions
-	ADCSRA = _BV(ADSC) | _BV(ADEN) | _BV(ADATE) | _BV(ADIE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); 
-	
-	// prescaler 128 : 9615 Hz - 150 Hz per 64 divisions, better for most music
-	sei();
-}
-
-void adcCalb()
-{ 
-	long midl = 0;
-	// get 2 meashurment at 2 sec
-	// on ADC input must be NO SIGNAL!!!
-	for (byte i = 0; i < 2; i++) {
-			position = 0;
-			delay(100);
-			midl += capture[0];
-			delay(900);
-	}
-	zero = -midl/2;
-}
-/**
- * End FFT functions
- */
 void setRGB(int r, int g, int b)
 {
 	// sanitize inputs
@@ -248,7 +197,9 @@ void graph()
 
 bool at_ambient_levels()
 {
-	for (byte i = 0; i < 64; i++)
+	for (byte i = 0; i < 2; i++)
+		if (spectrum[i] > AMBIENT_MAX_BASS_VOLUME) return false;
+	for (byte i = 2; i < 64; i++)
 		if (spectrum[i] > AMBIENT_MAX_VOLUME) return false;
 	return true;
 }
@@ -264,3 +215,57 @@ void fade_ambient()
 	if (ambient_counter % AMBIENT_SLOWDOWN_FACTOR == 0) ambient_led = (ambient_led + 1) % (AMBIENT_MAX_LED*3);
 	ambient_counter = (ambient_counter + 1) % AMBIENT_SLOWDOWN_FACTOR;
 }
+
+/**
+ * Begin FFT functions
+ */
+ISR(ADC_vect)
+{
+	if (position >= FFT_N)
+		return;
+
+	capture[position] = ADC + zero;
+	if (capture[position] == -1 || capture[position] == 1)
+		capture[position] = 0;
+
+	position++;
+}
+
+void adcInit()
+{
+	/**   REFS0 : VCC use as a ref, 
+	 *    IR_AUDIO : channel selection, 
+	 *    ADEN : ADC Enable, 
+	 *    ADSC : ADC Start, 
+	 *    ADATE : ADC Auto Trigger Enable, 
+	 *    ADIE : ADC Interrupt Enable,  
+	 *    ADPS : ADC Prescaler  
+	 */
+	
+	// free running ADC mode, f = ( 16MHz / prescaler ) / 13 cycles per conversion 
+	ADMUX = _BV(REFS0) | IR_AUDIO; // | _BV(ADLAR); 
+	
+	//  ADCSRA = _BV(ADSC) | _BV(ADEN) | _BV(ADATE) | _BV(ADIE) | _BV(ADPS2) | _BV(ADPS1) 
+	//prescaler 64 : 19231 Hz - 300Hz per 64 divisions
+	ADCSRA = _BV(ADSC) | _BV(ADEN) | _BV(ADATE) | _BV(ADIE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); 
+	
+	// prescaler 128 : 9615 Hz - 150 Hz per 64 divisions, better for most music
+	sei();
+}
+
+void adcCalb()
+{ 
+	long midl = 0;
+	// get 2 meashurment at 2 sec
+	// on ADC input must be NO SIGNAL!!!
+	for (byte i = 0; i < 2; i++) {
+			position = 0;
+			delay(100);
+			midl += capture[0];
+			delay(900);
+	}
+	zero = -midl/2;
+}
+/**
+ * End FFT functions
+ */
