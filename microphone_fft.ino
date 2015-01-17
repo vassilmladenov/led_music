@@ -9,7 +9,13 @@
 
 #include <stdint.h>
 #include <ffft.h>
- 
+
+#define AMBIENT_MAX_LED 50
+#define AMBIENT_MAX_VOLUME 25
+#define AMBIENT_SLOWDOWN_FACTOR 2
+
+#define BASS_THRESHOLD 160
+
 #define BASS_MIN 0
 #define BASS_MAX 5
 
@@ -41,8 +47,8 @@ typedef struct _RGB {
 } RGB;
 
 RGB led;
-
-
+byte ambient_led = 0;
+byte ambient_counter = 0;
 
 void setup()
 {
@@ -65,19 +71,23 @@ void loop()
 		// int bassCount = 0, midCount = 0, trebleCount = 0;
 		// if (spectrum[0] < 20 && spectrum[1] < 20) {
 			graph();
-			if (spectrum[0] > 160 && spectrum[0]-spectrum[1] > 40) {
-				setRGB(255, 255, 255);
+			if (at_ambient_levels()) {
+				fade_ambient();
 			} else {
-				byte peak = 2;
-				for (byte i = 2; i < 41; i++) {
-					if (spectrum[i] > 80 && spectrum[i] > spectrum[i-1] && spectrum[i] > spectrum[i+1]) peak = i;
-				}
-				// if (peak != 0) {
-				if (peak < 21) {
-					setRGB(255 - 25*peak, 25*peak,0);
+				if (spectrum[0] > BASS_THRESHOLD && spectrum[0]-spectrum[1] > 40) {
+					setRGB(255, 255, 255);
 				} else {
-				 	peak -= 20;
-					setRGB(0, 255 - 25*peak, 25*peak);
+					byte peak = 2;
+					for (byte i = 2; i < 41; i++) {
+						if (spectrum[i] > 80 && spectrum[i] > spectrum[i-1] && spectrum[i] > spectrum[i+1]) peak = i;
+					}
+					// if (peak != 0) {
+					if (peak < 21) {
+						setRGB(255 - 25*peak, 25*peak,0);
+					} else {
+					 	peak -= 20;
+						setRGB(0, 255 - 25*peak, 25*peak);
+					}
 				}
 			}
 		// }
@@ -234,4 +244,23 @@ void graph()
 		Serial.print('\t');
 	}
 	Serial.println();
+}
+
+bool at_ambient_levels()
+{
+	for (byte i = 0; i < 64; i++)
+		if (spectrum[i] > AMBIENT_MAX_VOLUME) return false;
+	return true;
+}
+
+void fade_ambient()
+{
+	if (ambient_led < AMBIENT_MAX_LED)
+		setRGB(0, AMBIENT_MAX_LED - ambient_led, ambient_led);
+	else if (ambient_led < AMBIENT_MAX_LED*2)
+		setRGB(ambient_led - AMBIENT_MAX_LED, 0, AMBIENT_MAX_LED*2 - ambient_led);
+	else
+		setRGB(AMBIENT_MAX_LED*3 - ambient_led, ambient_led - AMBIENT_MAX_LED*2, 0);
+	if (ambient_counter % AMBIENT_SLOWDOWN_FACTOR == 0) ambient_led = (ambient_led + 1) % (AMBIENT_MAX_LED*3);
+	ambient_counter = (ambient_counter + 1) % AMBIENT_SLOWDOWN_FACTOR;
 }
