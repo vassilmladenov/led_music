@@ -10,7 +10,7 @@ from OpenGL.GLU import *
 
 window = 0                                             # glut window number
 width, height = 1296, 820                              # window size
-uno = serial.Serial("/dev/tty.usbmodemfd131", 57600)   # initialize serial connection, 57600 baud rate
+uno = serial.Serial("/dev/tty.usbmodemfd141", 57600)   # initialize serial connection, 57600 baud rate
 
 # typical keyboard callback 
 def keyboard(key, x, y):
@@ -55,13 +55,23 @@ def draw():                                            # ondraw is called all th
         data = map(int, data)						   # string to int for entire array
         # print data                                     # debug statement to print array
         for i in range(len(data)):
-            if (i < 32):
-                glColor3f(1.0 - 1.0/32 * i, i*1.0/32, 0.0)
+            if (i < 3):
+                setRGB(255, 255, 255)                      # white
+            elif (i < 6):
+                setRGB(0, 255, (i-3)*85)
+            elif (i < 9):
+                setRGB(0, (255-(i-6)*85), 255)
+            elif (i < 16):
+                setRGB((i-9)*51, 0, 255)
+            elif (i < 33):
+                setRGB(255, 0, (255-(i-16)*15))
             else:
-                glColor3f(0.0, 1.0 - 1.0/31*(i-32), (i-32)*1.0/31)
+                setRGB(255, (i-33)*7, 0)
             draw_rect(10 + i*20, 10, 16, data[i]*4)    # rect width 16, height proportional to data[i]
     glutSwapBuffers()                                  # important for double buffering
-    
+
+def setRGB(r, g, b):
+    glColor3f(r / 255.0, g / 255.0, b / 255.0)    
 
 # initialization
 glutInit()                                             # initialize glut

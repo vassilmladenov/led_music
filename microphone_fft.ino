@@ -10,20 +10,17 @@
 #include <stdint.h>
 #include <ffft.h>
 
-#define AMBIENT_MAX_LED 50
+#define AML 50 // AMBIENT_MAX_LED
 #define AMBIENT_SLOWDOWN_FACTOR 2
 
 #define AMBIENT_MAX_BASS_VOLUME 50
 #define AMBIENT_MAX_VOLUME 25
 
-#define BASS_THRESHOLD 150
-#define ACCENT_THRESHOLD 150
+#define BASS_THRESHOLD 100
+#define ACCENT_THRESHOLD 100
 
-#define BASS_MIN 0
 #define BASS_MAX 5
-
-#define MID_MIN 5
-#define MID_MAX 16
+#define MID_MAX 10
 
 #define TREBLE_MIN 16
 #define TREBLE_MAX 64
@@ -42,6 +39,8 @@ complex_t bfly_buff[FFT_N];		/* FFT buffer */
 uint16_t spectrum[FFT_N/2];		/* Spectrum output buffer */
 uint16_t spectrumPrior[FFT_N/2]; // prior of spectrum
 float levelsPrior[3];
+
+int low_max = 0, mid_max = 0, high_max = 0;
 
 typedef struct _RGB {
 	byte r;
@@ -73,60 +72,58 @@ void loop()
 			fade_ambient();
 		} else {
 			if (bass_hit()) {
-				setRGB(255, 255, 255);
+		 		setRGB(255, 255, 255);
 			} else {
-				byte accent_index = find_accent();
-				if (accent_index != -1) {
-			        if (accent_index < 6)
-			            setRGB(255, (accent_index-1)*51, 0.0);
-			        else if (accent_index < 11)
-			            setRGB((255-(accent_index-6)*51), 255, 0.0);
-			        else if (accent_index < 16)
-			            setRGB(0, 255, (accent_index-11)*51);
-			        else if (accent_index < 33)
-			            setRGB(0, (255-(accent_index-16)*15), 255);
-			        else
-			            setRGB((accent_index-33)*7, 0, 255);
-				} else {
-					int low = 0, mid = 0, high = 0;
-					int low_count = 0, mid_count = 0, high_count = 0;
+				if (accentSkipCount < 1) {
+					byte accent_index = find_accent();
+					if (accent_index != 0) {
+				        if (accent_index < 6)
+				            setRGB(0, 255, (accent_index-3)*85);
+				        else if (accent_index < 9)
+				            setRGB(0, (255-(accent_index-6)*85), 255);
+				        else if (accent_index < 16)
+				            setRGB(0, (accent_index-9)*51, 255);
+				        else if (accent_index < 33)
+				            setRGB((255-(accent_index-16)*15), 0, 255);
+				        else
+				            setRGB(255, (accent_index-33)*7, 0);
+				    	accentSkipCount = 5;
+					} else { 
+						int low = 0, mid = 0, high = 0;
+						int low_count = 0, mid_count = 0, high_count = 0;
 
-					// average loop
-					for (byte i = 1; i < 64; i++) {
-						int s = spectrum[i];
-						if (s > AMBIENT_MAX_VOLUME) {
-							if (i < BASS_MAX) {
-								low += s;
-								low_count`++;
-							} else if (i < MID_MAX) {
-								mid += s;
-								mid_count++;
-							} else {
-								high += s;
-								high_count++;
-							}
-						}	
+						// average loop
+						for (byte i = 2; i < 64; i++) {
+							int s = spectrum[i];
+							if (s > AMBIENT_MAX_VOLUME) {
+								if (i < BASS_MAX) {
+									low += s;
+									low_count++;
+								} else if (i < MID_MAX) {
+									mid += s;
+									mid_count++;
+								} else {
+									high += s;
+									high_count++;
+								}
+							}	
+						}
+
+						low /= low_count;
+						mid /= mid_count;
+						high /= high_count;
+
+						if (low > low_max) low_max = low;
+						if (mid > mid_max) mid_max = mid;
+						if (high > high_max) high_max = high;
+
+						int frac_low = low * 255 / low_max;
+						int frac_mid = mid * 255 / mid_max;
+						int frac_high = high * 255 / high_max;
+						
+						setRGB(frac_high, frac_low, frac_mid);
 					}
-
-					low /= low_count;
-					mid /= mid_count;
-					high /= high_count;
-
-					if (low < mid) { // remove lowest
-						if (low < high) low = 0;
-						else high = 0;
-					} else {
-						if (mid < high) mid = 0;
-						else high = 0;
-					}
-					int sum = low + mid + high;
-
-					int frac_low = low * 255 / sum;
-					int frac_mid = mid * 255 / sum;
-					int frac_high = high * 255 / sum;
-					
-					setRGB(frac_low, frac_mid, frac_high);
-				}
+				} else accentSkipCount--;
 			}
 		}
 		position = 0;
@@ -199,31 +196,52 @@ bool at_ambient_levels()
 
 void fade_ambient()
 {
-	if (ambient_led < AMBIENT_MAX_LED)
-		setRGB(0, AMBIENT_MAX_LED - ambient_led, ambient_led);
-	else if (ambient_led < AMBIENT_MAX_LED*2)
-		setRGB(ambient_led - AMBIENT_MAX_LED, 0, AMBIENT_MAX_LED*2 - ambient_led);
-	else
-		setRGB(AMBIENT_MAX_LED*3 - ambient_led, ambient_led - AMBIENT_MAX_LED*2, 0);
-	if (ambient_counter % AMBIENT_SLOWDOWN_FACTOR == 0) ambient_led = (ambient_led + 1) % (AMBIENT_MAX_LED*3);
-	ambient_counter = (ambient_counter + 1) % AMBIENT_SLOWDOWN_FACTOR;
+	if (ambient_led < AML)
+		setRGB(0, AML, ambient_led); // green to cyan
+	else if (ambient_led < AML*2)
+		setRGB(0, AML*2 - ambient_led, AML); // cyan to blue
+	else if (ambient_led < AML*3)
+		setRGB(ambient_led - AML*2, 0, AML); // blue to magenta
+	else if (ambient_led < AML*4)
+		setRGB(AML, 0, AML*4 - ambient_led); // magenta to red
+	else if (ambient_led < AML*5)
+		setRGB(AML, ambient_led - AML*4, 0); // red to yellow
+	else if (ambient_led < AML*6)
+		setRGB(AML*6 - ambient_led, AML, 0); // yellow to green
+	ambient_led = (ambient_led + 1) % (AML*6);
 }
 
 // currently returns last accent, may need to modify
 byte find_accent()
 {
-	byte accent_index = -1;
-	for (byte i = 2; i < 41; i++) {
-		if (spectrum[i] > ACCENT_THRESHOLD &&
-			spectrum[i] > spectrum[i-1]    &&
-			spectrum[i] > spectrum[i+1]) accent_index = i;
+	byte accent_index = 0;
+	// int accent_vol = 0;
+	for (byte i = 3; i < 64; i++) {
+		if (spectrum[i] > ACCENT_THRESHOLD) // && spectrum[i] > accent_vol) {
+				accent_index = i;
+			// 	accent_vol = spectrum[i];
+			// }
 	}
 	return accent_index;
 }
 
+// currently returns last accent, may need to modify
+byte find_max()
+{
+	byte max_index = 0;
+	int max_vol = 0;
+	for (byte i = 3; i < 64; i++) {
+		if (spectrum[i] > max_vol) {
+			max_index = i;
+			max_vol = spectrum[i];
+		}
+	}
+	return max_vol;
+}
+
 bool bass_hit() 
 {
-	return spectrum[0] > BASS_THRESHOLD && spectrum[0]-spectrum[1] > 40;
+	return spectrum[0] > BASS_THRESHOLD || spectrum[1] > BASS_THRESHOLD || spectrum[2] > BASS_THRESHOLD;
 }
 
 /**
