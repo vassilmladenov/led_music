@@ -17,7 +17,7 @@
 #define AMBIENT_MAX_VOLUME 25
 
 #define BASS_THRESHOLD 100
-#define ACCENT_THRESHOLD 100
+#define ACCENT_THRESHOLD 125
 
 #define BASS_MAX 5
 #define MID_MAX 10
@@ -70,6 +70,9 @@ void loop()
 		graph();
 		if (at_ambient_levels()) {
 			fade_ambient();
+			low_max = 0;
+			mid_max = 0;
+			high_max = 0;
 		} else {
 			if (bass_hit()) {
 		 		setRGB(255, 255, 255);
@@ -87,7 +90,7 @@ void loop()
 				            setRGB((255-(accent_index-16)*15), 0, 255);
 				        else
 				            setRGB(255, (accent_index-33)*7, 0);
-				    	accentSkipCount = 5;
+				    	accentSkipCount = 3;
 					} else { 
 						int low = 0, mid = 0, high = 0;
 						int low_count = 0, mid_count = 0, high_count = 0;
@@ -215,28 +218,10 @@ void fade_ambient()
 byte find_accent()
 {
 	byte accent_index = 0;
-	// int accent_vol = 0;
-	for (byte i = 3; i < 64; i++) {
-		if (spectrum[i] > ACCENT_THRESHOLD) // && spectrum[i] > accent_vol) {
+	for (byte i = 3; i < 64; i++)
+		if (spectrum[i] > ACCENT_THRESHOLD)
 				accent_index = i;
-			// 	accent_vol = spectrum[i];
-			// }
-	}
 	return accent_index;
-}
-
-// currently returns last accent, may need to modify
-byte find_max()
-{
-	byte max_index = 0;
-	int max_vol = 0;
-	for (byte i = 3; i < 64; i++) {
-		if (spectrum[i] > max_vol) {
-			max_index = i;
-			max_vol = spectrum[i];
-		}
-	}
-	return max_vol;
 }
 
 bool bass_hit() 
