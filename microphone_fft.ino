@@ -9,27 +9,31 @@
 
 #include <stdint.h>
 #include <ffft.h>
+#include <avr/wdt.h>
 
 #define AML 50 // AMBIENT_MAX_LED
 #define AMBIENT_SLOWDOWN_FACTOR 2
 
-#define AMBIENT_MAX_BASS_VOLUME 50
-#define AMBIENT_MAX_VOLUME 25
+#define MIC_AMBIENT_MAX_BASS_VOLUME 50
+#define MIC_AMBIENT_MAX_VOLUME 30
+#define AUX_AMBIENT_MAX_VOLUME 75
 
-#define BASS_THRESHOLD 100
-#define ACCENT_THRESHOLD 125
+#define MIC_BASS_THRESHOLD 100
+#define AUX_BASS_THRESHOLD 550
+#define MIC_ACCENT_THRESHOLD 125
+#define AUX_ACCENT_THRESHOLD 850
 
 #define BASS_MAX 5
 #define MID_MAX 10
 
-#define TREBLE_MIN 16
-#define TREBLE_MAX 64
+#define SWITCHPIN 13
+#define GREENPIN 11
+#define REDPIN 10
+#define BLUEPIN 9
+#define RES 5
+#define STROBE 4
 
-#define  IR_AUDIO  5 // Analog input pin of the microphone
-
-#define REDPIN 5
-#define GREENPIN 6
-#define BLUEPIN 3
+#define IR_AUDIO  5 // Analog input pin of the microphone
 
 volatile  byte  position = 0;
 volatile  long  zero = 0;
@@ -39,6 +43,13 @@ complex_t bfly_buff[FFT_N];		/* FFT buffer */
 uint16_t spectrum[FFT_N/2];		/* Spectrum output buffer */
 uint16_t spectrumPrior[FFT_N/2]; // prior of spectrum
 float levelsPrior[3];
+byte input_switch = 0;
+int left[7]; // store band values in these arrays
+int right[7];
+int top[7];
+
+int band;
+byte slowdown_aux = 0;
 
 int low_max = 0, mid_max = 0, high_max = 0;
 
@@ -56,80 +67,147 @@ void setup()
 {
 	boot();
 	Serial.begin(57600);
-	adcInit();
-	adcCalb();
+	pinMode(SWITCHPIN, INPUT);
+	pinMode(RES, OUTPUT); // reset
+	pinMode(STROBE, OUTPUT); // strobe
+	input_switch = digitalRead(SWITCHPIN);
+	if (input_switch == 1) {
+		Serial.println("microphone");
+		adcInit();
+		adcCalb();
+	} else {
+		Serial.println("3.5 mm");
+		digitalWrite(RES,LOW); // reset low
+		digitalWrite(STROBE,HIGH); //pin 5 is RESET on the shield
+	}
 }
-int accentSkipCount = 0;
+int mic_accentSkipCount = 0;
+int aux_accentSkipCount = 0;
 void loop()
 {
-	if (position == FFT_N) {
-		fft_input(capture, bfly_buff);
-		fft_execute(bfly_buff);
-		fft_output(bfly_buff, spectrum);
-		
-		graph();
-		if (at_ambient_levels()) {
-			fade_ambient();
-			low_max = 0;
-			mid_max = 0;
-			high_max = 0;
-		} else {
-			if (bass_hit()) {
-		 		setRGB(255, 255, 255);
+	byte a = digitalRead(SWITCHPIN);
+	if (a != input_switch)
+		resetFunc();
+	if (input_switch == 1) {
+		if (position == FFT_N) {
+			fft_input(capture, bfly_buff);
+			fft_execute(bfly_buff);
+			fft_output(bfly_buff, spectrum);
+			
+			graph_microphone();
+			if (mic_at_ambient_levels()) {
+				fade_ambient();
+				low_max = 0;
+				mid_max = 0;
+				high_max = 0;
 			} else {
-				if (accentSkipCount < 1) {
-					byte accent_index = find_accent();
-					if (accent_index != 0) {
-				        if (accent_index < 6)
-				            setRGB(0, 255, (accent_index-3)*85);
-				        else if (accent_index < 9)
-				            setRGB(0, (255-(accent_index-6)*85), 255);
-				        else if (accent_index < 16)
-				            setRGB(0, (accent_index-9)*51, 255);
-				        else if (accent_index < 33)
-				            setRGB((255-(accent_index-16)*15), 0, 255);
-				        else
-				            setRGB(255, (accent_index-33)*7, 0);
-				    	accentSkipCount = 3;
-					} else { 
-						int low = 0, mid = 0, high = 0;
-						int low_count = 0, mid_count = 0, high_count = 0;
+				if (mic_bass_hit()) {
+			 		setRGB(255, 255, 255);
+				} else {
+					if (mic_accentSkipCount < 1) {
+						byte accent_index = mic_find_accent();
+						if (accent_index != 0) {
+					        if (accent_index < 6)
+					            setRGB(0, 255, (accent_index-3)*85);
+					        else if (accent_index < 9)
+					            setRGB(0, (255-(accent_index-6)*85), 255);
+					        else if (accent_index < 16)
+					            setRGB(0, (accent_index-9)*51, 255);
+					        else if (accent_index < 33)
+					            setRGB((255-(accent_index-16)*15), 0, 255);
+					        else
+					            setRGB(255, (accent_index-33)*7, 0);
+					    	mic_accentSkipCount = 3;
+						} else { 
+							int low = 0, mid = 0, high = 0;
+							int low_count = 0, mid_count = 0, high_count = 0;
 
-						// average loop
-						for (byte i = 2; i < 64; i++) {
-							int s = spectrum[i];
-							if (s > AMBIENT_MAX_VOLUME) {
-								if (i < BASS_MAX) {
-									low += s;
-									low_count++;
-								} else if (i < MID_MAX) {
-									mid += s;
-									mid_count++;
-								} else {
-									high += s;
-									high_count++;
-								}
-							}	
+							// average loop
+							for (byte i = 2; i < 64; i++) {
+								int s = spectrum[i];
+								if (s > MIC_AMBIENT_MAX_VOLUME) {
+									if (i < BASS_MAX) {
+										low += s;
+										low_count++;
+									} else if (i < MID_MAX) {
+										mid += s;
+										mid_count++;
+									} else {
+										high += s;
+										high_count++;
+									}
+								}	
+							}
+
+							low /= low_count;
+							mid /= mid_count;
+							high /= high_count;
+
+							if (low > low_max) low_max = low;
+							if (mid > mid_max) mid_max = mid;
+							if (high > high_max) high_max = high;
+
+							int frac_low = low * 255 / low_max;
+							int frac_mid = mid * 255 / mid_max;
+							int frac_high = high * 255 / high_max;
+							
+							setRGB(frac_high, frac_low, frac_mid);
 						}
+					} else mic_accentSkipCount--;
+				}
+			}
+			position = 0;
+		}
+	} else {
+		readMSGEQ7();
+		slowdown_aux = (slowdown_aux + 1) % 10;
+		if (slowdown_aux == 0) {
+			graph_aux();
+		}
+		if (aux_at_ambient_levels()) {
+			if (slowdown_aux == 0) fade_ambient();
+		} else {
+			if (aux_bass_hit()) {
+				setRGB(255,255,255);
+			} else {
+				if (aux_accentSkipCount < 1) {
+					byte accent_index = aux_find_accent();
+					if (accent_index != 0) {
+						if (accent_index == 1)
+					        setRGB(0, 255, 0);
+					    else if (accent_index == 2)
+					        setRGB(0, 255, 255);
+					    else if (accent_index == 3)
+					        setRGB(0, 0, 255);
+					    else if (accent_index == 4)
+					        setRGB(255, 0, 255);
+					    else if (accent_index == 5)
+					        setRGB(255, 0, 0);
+					    else if (accent_index == 6)
+					        setRGB(255, 255, 0);
+				    	aux_accentSkipCount = 3;
+					} else { 
+						int low = (top[1] + top[2]) / 2;
+						int mid = (top[3] + top[4]) / 2;
+						int high = (top[5] + top[6]) / 2;
 
-						low /= low_count;
-						mid /= mid_count;
-						high /= high_count;
+						int frac_low = low * 255 / 800;
+						int frac_mid = mid * 255 / 800;
+						int frac_high = high * 255 / 800;
 
-						if (low > low_max) low_max = low;
-						if (mid > mid_max) mid_max = mid;
-						if (high > high_max) high_max = high;
+						// if (low > low_max) low_max = low;
+						// if (mid > mid_max) mid_max = mid;
+						// if (high > high_max) high_max = high;
 
-						int frac_low = low * 255 / low_max;
-						int frac_mid = mid * 255 / mid_max;
-						int frac_high = high * 255 / high_max;
-						
+						// int frac_low = low * 255 / low_max;
+						// int frac_mid = mid * 255 / mid_max;
+						// int frac_high = high * 255 / high_max;
+
 						setRGB(frac_high, frac_low, frac_mid);
 					}
-				} else accentSkipCount--;
+				} else aux_accentSkipCount--;
 			}
 		}
-		position = 0;
 	}
 }
 
@@ -179,7 +257,7 @@ void boot()
 	turnOff();
 }
 
-void graph()
+void graph_microphone()
 {
 	for (byte i = 0; i < 64; i++) {
 		Serial.print(spectrum[i]);
@@ -188,12 +266,38 @@ void graph()
 	Serial.println();
 }
 
-bool at_ambient_levels()
+void graph_aux()
+{
+	// display values of left channel on serial monitor
+	for (band = 0; band < 7; band++)
+	{
+		Serial.print(left[band]);
+		Serial.print("\t");
+	}
+	// display values of right channel on serial monitor
+	for (band = 0; band < 7; band++)
+	{
+	Serial.print(right[band]);
+	Serial.print("\t");
+	}
+	Serial.println();
+}
+
+bool mic_at_ambient_levels()
 {
 	for (byte i = 0; i < 2; i++)
-		if (spectrum[i] > AMBIENT_MAX_BASS_VOLUME) return false;
+		if (spectrum[i] > MIC_AMBIENT_MAX_BASS_VOLUME) return false;
 	for (byte i = 2; i < 64; i++)
-		if (spectrum[i] > AMBIENT_MAX_VOLUME) return false;
+		if (spectrum[i] > MIC_AMBIENT_MAX_VOLUME) return false;
+	return true;
+}
+
+bool aux_at_ambient_levels()
+{
+	for (byte i = 0; i < 7; i++) {
+		if (left[i] > AUX_AMBIENT_MAX_VOLUME) return false;
+		if (right[i] > AUX_AMBIENT_MAX_VOLUME) return false;
+	}
 	return true;
 }
 
@@ -215,18 +319,57 @@ void fade_ambient()
 }
 
 // currently returns last accent, may need to modify
-byte find_accent()
+byte mic_find_accent()
 {
 	byte accent_index = 0;
 	for (byte i = 3; i < 64; i++)
-		if (spectrum[i] > ACCENT_THRESHOLD)
+		if (spectrum[i] > MIC_ACCENT_THRESHOLD)
 				accent_index = i;
 	return accent_index;
 }
 
-bool bass_hit() 
+byte aux_find_accent()
 {
-	return spectrum[0] > BASS_THRESHOLD || spectrum[1] > BASS_THRESHOLD || spectrum[2] > BASS_THRESHOLD;
+	byte accent_index = 0;
+	for (byte i = 1; i < 7; i++)
+		if (top[i] > AUX_ACCENT_THRESHOLD)
+			accent_index = i;
+	return accent_index;
+}
+
+bool mic_bass_hit() 
+{
+	return spectrum[0] > MIC_BASS_THRESHOLD || spectrum[1] > MIC_BASS_THRESHOLD || spectrum[2] > MIC_BASS_THRESHOLD;
+}
+
+bool aux_bass_hit() 
+{
+	return left[0] > AUX_BASS_THRESHOLD || right[0] > AUX_BASS_THRESHOLD;
+}
+
+void resetFunc() {
+	Serial.println("reset");
+	wdt_enable(WDTO_15MS);
+	while(1);
+}
+
+void readMSGEQ7()
+// Function to read 7 band equalizers
+{
+	digitalWrite(RES, HIGH);
+	digitalWrite(RES, LOW);
+	for(band = 0; band < 7; band++)
+	{
+		digitalWrite(STROBE,LOW); // strobe pin on the shield - kicks the IC up to the next band 
+		delayMicroseconds(30); // 
+		left[band] = analogRead(0); // store left band reading
+		right[band] = analogRead(1); // ... and the right
+		digitalWrite(STROBE,HIGH); 
+	}
+	for (byte i = 0; i < 7; i++) {
+		if (left[i] > right[i]) top[i] = left[i];
+		else top[i] = right[i];
+	}
 }
 
 /**
@@ -269,13 +412,13 @@ void adcInit()
 void adcCalb()
 { 
 	long midl = 0;
-	// get 2 meashurment at 2 sec
+	// get 2 measurement at 2 sec
 	// on ADC input must be NO SIGNAL!!!
 	for (byte i = 0; i < 2; i++) {
-			position = 0;
-			delay(100);
-			midl += capture[0];
-			delay(900);
+		position = 0;
+		delay(100);
+		midl += capture[0];
+		delay(900);
 	}
 	zero = -midl/2;
 }
