@@ -10,7 +10,7 @@ from OpenGL.GLU import *
 
 window = 0                                             # glut window number
 width, height = 1920, 1080                              # window size
-uno = serial.Serial("/dev/tty.usbmodemfd131", 57600)   # initialize serial connection, 57600 baud rate
+uno = serial.Serial("/dev/tty.usbmodemfa141", 57600)   # initialize serial connection, 57600 baud rate
 
 # typical keyboard callback 
 def keyboard(key, x, y):
